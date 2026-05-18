@@ -51,7 +51,8 @@ export default async function handler(req, res) {
       // kamu bisa membuat endpoint lain di Vercel untuk me-render video ini
       // dengan meminta ke Telegram API menggunakan file_id.
       
-      const appUrl = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'URL_VERCEL_KAMU';
+      // KITA UBAH BAGIAN INI: Masukkan link UTAMA Vercel kamu secara langsung di sini
+      const appUrl = 'https://telegram-video-bot-six.vercel.app';
       
       // Kita buat link custom yang mengarah kembali ke bot ini atau ke endpoint Vercel lain
       // Misalnya: https://t.me/NamaBotKamu?start=video_id_sekian
