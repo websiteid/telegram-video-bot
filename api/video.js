@@ -6,6 +6,7 @@ export default async function handler(req, res) {
 
   // Mengambil parameter 'id' dari URL (misalnya ?id=BAAC...)
   const fileId = req.query.id;
+  const thumbId = req.query.thumb; // Mengambil parameter thumbnail
 
   if (!fileId) {
     return res.status(400).send('File ID tidak ditemukan di URL.');
@@ -33,51 +34,66 @@ export default async function handler(req, res) {
     const filePath = fileData.result.file_path;
 
     // 2. Buat URL langsung (direct link) ke file tersebut
-    // Catatan: Link ini sifatnya SEMENTARA (hanya bertahan sekitar 1 jam menurut aturan Telegram)
     const videoDirectUrl = `https://api.telegram.org/file/bot${token}/${filePath}`;
 
-    // 3. Kita kembalikan halaman HTML sederhana yang memiliki pemutar video (video player)
+    // 3. (BARU) Jika ada thumbId, ambil URL gambarnya dari Telegram
+    let posterUrl = '';
+    if (thumbId) {
+       try {
+           const getThumbUrl = `https://api.telegram.org/bot${token}/getFile?file_id=${thumbId}`;
+           const thumbRes = await fetch(getThumbUrl);
+           const thumbData = await thumbRes.json();
+           if (thumbData.ok) {
+               posterUrl = `https://api.telegram.org/file/bot${token}/${thumbData.result.file_path}`;
+           }
+       } catch (err) {
+           console.log("Gagal mengambil thumbnail:", err);
+       }
+    }
+
+    // 4. Kita kembalikan halaman HTML dengan tampilan Fullscreen dan Poster
     const htmlContent = `
       <!DOCTYPE html>
       <html lang="id">
       <head>
           <meta charset="UTF-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
           <title>Pemutar Video</title>
           <style>
-              body {
+              /* Mengubah tampilan agar memenuhi seluruh layar tanpa margin */
+              html, body {
                   margin: 0;
                   padding: 0;
+                  width: 100%;
+                  height: 100%;
+                  background-color: #000; /* Warna hitam legam lebih cocok untuk video full */
+                  overflow: hidden; /* Mencegah scroll */
                   display: flex;
                   justify-content: center;
                   align-items: center;
-                  height: 100vh;
-                  background-color: #111; /* Warna latar belakang gelap */
-                  font-family: sans-serif;
-                  color: white;
               }
+              
+              /* Membuat video selebar dan setinggi layar, menjaga rasio aspek */
               video {
-                  max-width: 100%;
-                  max-height: 100vh;
-                  box-shadow: 0 4px 20px rgba(0,0,0,0.5);
-              }
-              .container {
-                  text-align: center;
+                  width: 100vw;
+                  height: 100vh;
+                  object-fit: contain; /* memastikan video tidak terpotong, tapi memenuhi maksimal ruang */
+                  outline: none; /* Hilangkan garis biru saat diklik */
               }
           </style>
       </head>
       <body>
-          <div class="container">
-              <!-- Memutar video langsung dari server Telegram -->
-              <video controls autoplay>
-                  <source src="${videoDirectUrl}" type="video/mp4">
-                  Browser kamu tidak mendukung pemutar video HTML5.
-              </video>
-              <br>
-              <p style="opacity: 0.5; font-size: 12px; margin-top: 10px;">
-                  Link video ini bersifat sementara dan mungkin kedaluwarsa.
-              </p>
-          </div>
+          <!-- Memutar video dengan atribut preload dan poster -->
+          <!-- controlsList="nodownload" (opsional) mencegah tombol download default browser -->
+          <video 
+            controls 
+            preload="metadata" 
+            ${posterUrl ? `poster="${posterUrl}"` : ''} 
+            playsinline
+          >
+              <source src="${videoDirectUrl}" type="video/mp4">
+              Browser kamu tidak mendukung pemutar video HTML5.
+          </video>
       </body>
       </html>
     `;
