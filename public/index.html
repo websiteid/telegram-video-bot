@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vercel Drive Streamer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .glass {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+    </style>
+</head>
+<body class="bg-slate-950 text-white min-h-screen flex flex-col items-center justify-center p-4 font-sans selection:bg-indigo-500">
+    <div class="w-full max-w-2xl glass rounded-2xl p-6 shadow-2xl space-y-6">
+        <div class="text-center">
+            <h1 class="text-2xl font-bold bg-gradient-to-r from-blue-400 to-indigo-400 bg-clip-text text-transparent">Vercel Google Drive Video Player</h1>
+            <p class="text-xs text-slate-400 mt-1">Stream video langsung dari Google Drive melewati proxy Vercel</p>
+        </div>
+
+        <div class="space-y-2">
+            <label class="text-sm font-medium text-slate-300">Masukkan Link atau ID File Google Drive:</label>
+            <div class="flex gap-2">
+                <input type="text" id="driveInput" placeholder="https://drive.google.com/file/d/FILE_ID/view" 
+                       class="flex-1 bg-slate-900/50 border border-slate-800 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500 transition-colors">
+                <button onclick="generateStream()" class="bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-sm font-semibold px-4 py-2 rounded-lg transition-all">
+                    Putar
+                </button>
+            </div>
+        </div>
+
+        <div id="playerContainer" class="hidden space-y-3">
+            <div class="text-xs text-slate-400 break-all bg-slate-900/40 p-2 rounded border border-slate-800/80">
+                <span class="font-semibold text-indigo-400">Stream URL:</span> <span id="streamUrl"></span>
+            </div>
+            <video id="videoPlayer" controls class="w-full rounded-lg border border-slate-800 bg-black aspect-video shadow-inner">
+                Your browser does not support the video tag.
+            </video>
+        </div>
+    </div>
+
+    <script>
+        function extractFileId(input) {
+            const trimmed = input.trim();
+            if (!trimmed.startsWith('http')) return trimmed; 
+            const match = trimmed.match(/\/d\/([^\/]+)/);
+            return match ? match[1] : null;
+        }
+
+        function generateStream() {
+            const inputVal = document.getElementById('driveInput').value;
+            const fileId = extractFileId(inputVal);
+            
+            if (!fileId) {
+                alert('ID File tidak valid atau link tidak dikenali!');
+                return;
+            }
+
+            const currentDomain = window.location.origin;
+            const apiUrl = `${currentDomain}/api/video?id=${fileId}`;
+            
+            document.getElementById('streamUrl').innerText = apiUrl;
+            const player = document.getElementById('videoPlayer');
+            player.src = apiUrl;
+            
+            document.getElementById('playerContainer').classList.remove('hidden');
+            player.load();
+            player.play().catch(e => console.log("Autoplay dicegah browser."));
+        }
+    </script>
+</body>
+</html>
