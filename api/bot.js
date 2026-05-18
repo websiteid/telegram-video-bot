@@ -43,21 +43,19 @@ export default async function handler(req, res) {
       const video = update.message.video;
       const fileId = video.file_id;
       
-      // Di Telegram, kita tidak selalu bisa mendapatkan link publik langsung untuk file,
-      // kecuali channelnya publik.
-      // Jadi, kita simpan 'file_id' nya saja ke Google Sheet.
-      
-      // Jika kamu punya domain Vercel (misal: my-video-bot.vercel.app),
-      // kamu bisa membuat endpoint lain di Vercel untuk me-render video ini
-      // dengan meminta ke Telegram API menggunakan file_id.
-      
+      // Ambil ID thumbnail jika tersedia dari Telegram
+      let thumbId = '';
+      if (video.thumbnail && video.thumbnail.file_id) {
+          thumbId = video.thumbnail.file_id;
+      } else if (video.thumb && video.thumb.file_id) { // Untuk kompatibilitas versi API lama
+          thumbId = video.thumb.file_id;
+      }
+
       // KITA UBAH BAGIAN INI: Masukkan link UTAMA Vercel kamu secara langsung di sini
       const appUrl = 'https://telegram-video-bot-six.vercel.app';
       
-      // Kita buat link custom yang mengarah kembali ke bot ini atau ke endpoint Vercel lain
-      // Misalnya: https://t.me/NamaBotKamu?start=video_id_sekian
-      // Atau link web: https://my-vercel-app.vercel.app/api/video?id=xxxx
-      const generatedLink = `${appUrl}/api/video?id=${fileId}`; 
+      // Tambahkan param &thumb= ke URL agar halaman video bisa menampilkannya
+      const generatedLink = `${appUrl}/api/video?id=${fileId}${thumbId ? `&thumb=${thumbId}` : ''}`; 
       
       await sendMessage("⏳ Sedang memproses video dan menyimpannya ke database...");
       
