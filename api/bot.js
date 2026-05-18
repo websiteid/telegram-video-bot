@@ -1,110 +1,101 @@
-// API ini dirancang untuk dijalankan sebagai Serverless Function di Vercel.
-// Di Vercel, pastikan untuk men-setting Environment Variables:
-// 1. TELEGRAM_BOT_TOKEN
-// 2. GOOGLE_APPS_SCRIPT_URL (URL dari langkah 1)
-// 3. VERCEL_URL (URL domain vercel kamu, opsional, jika ingin membuat link custom)
-
 export default async function handler(req, res) {
-  // Telegram akan mengirim update ke sini melalui POST request
-  if (req.method === 'POST') {
-    
-    const update = req.body;
-    
-    // Pastikan request memiliki data pesan
-    if (!update || !update.message) {
-      return res.status(200).json({ message: "Bukan pesan standar" });
+  // Hanya menerima GET request karena ini diakses via browser
+  if (req.method !== 'GET') {
+    return res.status(405).json({ error: 'Method Not Allowed' });
+  }
+
+  const { id, thumb } = req.query;
+  const botToken = process.env.TELEGRAM_BOT_TOKEN;
+
+  // Jika tidak ada ID video, tampilkan pesan error
+  if (!id) {
+    return res.status(400).send("ID File Video tidak ditemukan pada URL.");
+  }
+
+  // Memastikan token bot sudah diatur di Vercel Environment Variables
+  if (!botToken) {
+    return res.status(500).send("Token Bot Telegram belum dikonfigurasi di Vercel.");
+  }
+
+  try {
+    // 1. Ambil informasi lokasi file video asli langsung dari Telegram
+    const videoFileRes = await fetch(`https://api.telegram.org/bot${botToken}/getFile?file_id=${id}`);
+    const videoFileData = await videoFileRes.json();
+
+    if (!videoFileData.ok) {
+      console.error("Gagal mendapat video:", videoFileData);
+      return res.status(404).send("Video tidak ditemukan atau sudah kadaluarsa di Telegram.");
     }
-    
-    const chatId = update.message.chat.id;
-    const messageId = update.message.message_id;
-    
-    const sendMessage = async (text) => {
-      const token = process.env.TELEGRAM_BOT_TOKEN;
-      const url = `https://api.telegram.org/bot${token}/sendMessage`;
-      
-      try {
-        await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            chat_id: chatId,
-            text: text,
-            reply_to_message_id: messageId,
-            parse_mode: "HTML"
-          })
-        });
-      } catch (error) {
-        console.error("Gagal mengirim pesan balasan:", error);
-      }
-    };
-    
-    if (update.message.video) {
-      // User mengirimkan video
-      const video = update.message.video;
-      const fileId = video.file_id;
-      
-      // Ambil ID thumbnail jika tersedia dari Telegram
-      let thumbId = '';
-      if (video.thumbnail && video.thumbnail.file_id) {
-          thumbId = video.thumbnail.file_id;
-      } else if (video.thumb && video.thumb.file_id) { // Untuk kompatibilitas versi API lama
-          thumbId = video.thumb.file_id;
-      }
 
-      // KITA UBAH BAGIAN INI: Masukkan link UTAMA Vercel kamu secara langsung di sini
-      const appUrl = 'https://telegram-video-bot-six.vercel.app';
-      
-      // Tambahkan param &thumb= ke URL agar halaman video bisa menampilkannya
-      const generatedLink = `${appUrl}/api/video?id=${fileId}${thumbId ? `&thumb=${thumbId}` : ''}`; 
-      
-      await sendMessage("⏳ Sedang memproses video dan menyimpannya ke database...");
-      
-      const sheetApiUrl = process.env.GOOGLE_APPS_SCRIPT_URL;
-      
-      if (!sheetApiUrl) {
-         await sendMessage("❌ Sistem belum dikonfigurasi sepenuhnya (Google Sheets URL hilang).");
-         return res.status(200).send('OK');
-      }
+    // Ini adalah link "Direct Stream" langsung ke server Telegram (Anti-Lag)
+    const directVideoUrl = `https://api.telegram.org/file/bot${botToken}/${videoFileData.result.file_path}`;
 
+    // 2. Ambil URL thumbnail/poster jika parameter thumb tersedia
+    let posterUrl = "";
+    if (thumb) {
       try {
-        const sheetResponse = await fetch(sheetApiUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            videoId: messageId,
-            fileId: fileId,
-            telegramUrl: generatedLink
-          })
-        });
-        
-        const result = await sheetResponse.json();
-        
-        if (result.status === 'success') {
-           const replyText = `✅ **Video Berhasil Disimpan!**\n\n` + 
-                             `🔗 **Link Video Kamu:**\n<a href="${generatedLink}">${generatedLink}</a>\n\n` +
-                             `*(Data telah tercatat di Google Sheets)*`;
-           await sendMessage(replyText);
-        } else {
-           await sendMessage("⚠️ Gagal menyimpan ke database, tapi video diterima.");
+        const thumbFileRes = await fetch(`https://api.telegram.org/bot${botToken}/getFile?file_id=${thumb}`);
+        const thumbFileData = await thumbFileRes.json();
+        if (thumbFileData.ok) {
+          posterUrl = `https://api.telegram.org/file/bot${botToken}/${thumbFileData.result.file_path}`;
         }
-        
-      } catch (error) {
-        console.error("Error ke Google Sheets:", error);
-        await sendMessage("❌ Terjadi kesalahan saat menghubungi database.");
+      } catch (thumbErr) {
+        console.error("Gagal mengambil thumbnail:", thumbErr);
+        // Tetap lanjut meskipun gagal ambil thumbnail
       }
-      
-    } else {
-      // Jika bukan video, suruh kirim video
-      await sendMessage("Kirimkan saya sebuah video, dan saya akan membuatkan linknya untukmu!");
     }
-    
-    // Telegram mengharapkan status 200 OK agar tidak mengirim ulang webhook
-    return res.status(200).send('OK');
-    
-  } else {
-    // Jika ada yang mengakses via browser biasa
-    res.status(200).json({ status: "Bot is running. Menunggu webhook dari Telegram." });
+
+    // 3. Tampilkan HTML super ringan yang langsung memutar dari link direct Telegram
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html lang="id">
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+        <title>Video Player</title>
+        <style>
+          /* Reset margin dan buat tampilan hitam penuh (Fullscreen) */
+          * { margin: 0; padding: 0; box-sizing: border-box; }
+          body, html { 
+            width: 100%; 
+            height: 100%; 
+            background-color: #000; /* Latar belakang hitam pekat */
+            overflow: hidden; /* Hilangkan scrollbar */
+            display: flex; 
+            justify-content: center; 
+            align-items: center; 
+          }
+          
+          /* Atur agar video pas di layar tanpa merusak rasio */
+          video { 
+            width: 100vw; 
+            height: 100vh; 
+            object-fit: contain; 
+            background: #000;
+            outline: none;
+          }
+        </style>
+      </head>
+      <body>
+        <!-- preload="auto" memaksa browser memuat video sebelum di-play agar tidak lag -->
+        <video 
+          controls 
+          preload="auto" 
+          playsinline 
+          ${posterUrl ? `poster="${posterUrl}"` : ''}
+        >
+          <source src="${directVideoUrl}" type="video/mp4">
+          Browser kamu tidak mendukung pemutar video HTML5.
+        </video>
+      </body>
+      </html>
+    `;
+
+    res.setHeader('Content-Type', 'text/html');
+    return res.status(200).send(htmlContent);
+
+  } catch (error) {
+    console.error("Kesalahan Server:", error);
+    return res.status(500).send("Terjadi kesalahan sistem saat memuat video.");
   }
 }
