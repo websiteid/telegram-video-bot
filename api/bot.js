@@ -1,0 +1,111 @@
+// API ini dirancang untuk dijalankan sebagai Serverless Function di Vercel.
+// Di Vercel, pastikan untuk men-setting Environment Variables:
+// 1. TELEGRAM_BOT_TOKEN
+// 2. GOOGLE_APPS_SCRIPT_URL (URL dari langkah 1)
+// 3. VERCEL_URL (URL domain vercel kamu, opsional, jika ingin membuat link custom)
+
+export default async function handler(req, res) {
+  // Telegram akan mengirim update ke sini melalui POST request
+  if (req.method === 'POST') {
+    
+    const update = req.body;
+    
+    // Pastikan request memiliki data pesan
+    if (!update || !update.message) {
+      return res.status(200).json({ message: "Bukan pesan standar" });
+    }
+    
+    const chatId = update.message.chat.id;
+    const messageId = update.message.message_id;
+    
+    const sendMessage = async (text) => {
+      const token = process.env.TELEGRAM_BOT_TOKEN;
+      const url = `https://api.telegram.org/bot${token}/sendMessage`;
+      
+      try {
+        await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: chatId,
+            text: text,
+            reply_to_message_id: messageId,
+            parse_mode: "HTML"
+          })
+        });
+      } catch (error) {
+        console.error("Gagal mengirim pesan balasan:", error);
+      }
+    };
+    
+    if (update.message.video) {
+      // User mengirimkan video
+      const video = update.message.video;
+      const fileId = video.file_id;
+      
+      // Di Telegram, kita tidak selalu bisa mendapatkan link publik langsung untuk file,
+      // kecuali channelnya publik.
+      // Jadi, kita simpan 'file_id' nya saja ke Google Sheet.
+      
+      // Jika kamu punya domain Vercel (misal: my-video-bot.vercel.app),
+      // kamu bisa membuat endpoint lain di Vercel untuk me-render video ini
+      // dengan meminta ke Telegram API menggunakan file_id.
+      
+      const appUrl = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'URL_VERCEL_KAMU';
+      
+      // Kita buat link custom yang mengarah kembali ke bot ini atau ke endpoint Vercel lain
+      // Misalnya: https://t.me/NamaBotKamu?start=video_id_sekian
+      // Atau link web: https://my-vercel-app.vercel.app/api/video?id=xxxx
+      const generatedLink = `${appUrl}/api/video?id=${fileId}`; 
+      
+      await sendMessage("⏳ Sedang memproses video dan menyimpannya ke database...");
+      
+      const sheetApiUrl = process.env.GOOGLE_APPS_SCRIPT_URL;
+      
+      if (!sheetApiUrl) {
+         await sendMessage("❌ Sistem belum dikonfigurasi sepenuhnya (Google Sheets URL hilang).");
+         return res.status(200).send('OK');
+      }
+
+      try {
+        const sheetResponse = await fetch(sheetApiUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            videoId: messageId,
+            fileId: fileId,
+            telegramUrl: generatedLink
+          })
+        });
+        
+        const result = await sheetResponse.json();
+        
+        if (result.status === 'success') {
+           const replyText = `✅ **Video Berhasil Disimpan!**\n\n` + 
+                             `🔗 **Link Video Kamu:**\n<a href="${generatedLink}">${generatedLink}</a>\n\n` +
+                             `*(Data telah tercatat di Google Sheets)*`;
+           await sendMessage(replyText);
+        } else {
+           await sendMessage("⚠️ Gagal menyimpan ke database, tapi video diterima.");
+        }
+        
+      } catch (error) {
+        console.error("Error ke Google Sheets:", error);
+        await sendMessage("❌ Terjadi kesalahan saat menghubungi database.");
+      }
+      
+    } else {
+      // Jika bukan video, suruh kirim video
+      await sendMessage("Kirimkan saya sebuah video, dan saya akan membuatkan linknya untukmu!");
+    }
+    
+    // Telegram mengharapkan status 200 OK agar tidak mengirim ulang webhook
+    return res.status(200).send('OK');
+    
+  } else {
+    // Jika ada yang mengakses via browser biasa
+    res.status(200).json({ status: "Bot is running. Menunggu webhook dari Telegram." });
+  }
+}
