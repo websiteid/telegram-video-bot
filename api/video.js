@@ -1,101 +1,63 @@
-export default async function handler(req, res) {
-  // Hanya menerima GET request karena ini diakses via browser
-  if (req.method !== 'GET') {
-    return res.status(405).json({ error: 'Method Not Allowed' });
-  }
+const axios = require('axios');
 
-  const { id, thumb } = req.query;
-  const botToken = process.env.TELEGRAM_BOT_TOKEN;
+module.exports = async (req, res) => {
+    // Mengambil ID file dari query string (?id=FILE_ID)
+    const fileId = req.query.id;
 
-  // Jika tidak ada ID video, tampilkan pesan error
-  if (!id) {
-    return res.status(400).send("ID File Video tidak ditemukan pada URL.");
-  }
-
-  // Memastikan token bot sudah diatur di Vercel Environment Variables
-  if (!botToken) {
-    return res.status(500).send("Token Bot Telegram belum dikonfigurasi di Vercel.");
-  }
-
-  try {
-    // 1. Ambil informasi lokasi file video asli langsung dari Telegram
-    const videoFileRes = await fetch(`https://api.telegram.org/bot${botToken}/getFile?file_id=${id}`);
-    const videoFileData = await videoFileRes.json();
-
-    if (!videoFileData.ok) {
-      console.error("Gagal mendapat video:", videoFileData);
-      return res.status(404).send("Video tidak ditemukan atau sudah kadaluarsa di Telegram.");
+    if (!fileId) {
+        return res.status(400).json({ error: 'Missing "id" parameter dalam query URL.' });
     }
 
-    // Ini adalah link "Direct Stream" langsung ke server Telegram (Anti-Lag)
-    const directVideoUrl = `https://api.telegram.org/file/bot${botToken}/${videoFileData.result.file_path}`;
+    // Mengambil API Key dari Environment Variables (Sangat direkomendasikan jika file besar)
+    const apiKey = process.env.GOOGLE_API_KEY;
+    
+    // URL Google Drive API untuk mendownload file mentah (alt=media)
+    let driveUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`;
+    if (apiKey) {
+        driveUrl += `&key=${apiKey}`;
+    }
 
-    // 2. Ambil URL thumbnail/poster jika parameter thumb tersedia
-    let posterUrl = "";
-    if (thumb) {
-      try {
-        const thumbFileRes = await fetch(`https://api.telegram.org/bot${botToken}/getFile?file_id=${thumb}`);
-        const thumbFileData = await thumbFileRes.json();
-        if (thumbFileData.ok) {
-          posterUrl = `https://api.telegram.org/file/bot${botToken}/${thumbFileData.result.file_path}`;
+    try {
+        // Melakukan request ke Google Drive dengan responseType 'stream'
+        const response = await axios({
+            method: 'GET',
+            url: driveUrl,
+            responseType: 'stream',
+            headers: {
+                // Teruskan header Range jika browser memintanya (penting untuk seeking/scrubbing video)
+                ...(req.headers.range && { Range: req.headers.range })
+            }
+        });
+
+        // Meneruskan headers penting dari Google Drive ke Browser agar terbaca sebagai Video Stream
+        res.setHeader('Content-Type', response.headers['content-type'] || 'video/mp4');
+        
+        if (response.headers['content-length']) {
+            res.setHeader('Content-Length', response.headers['content-length']);
         }
-      } catch (thumbErr) {
-        console.error("Gagal mengambil thumbnail:", thumbErr);
-        // Tetap lanjut meskipun gagal ambil thumbnail
-      }
+        if (response.headers['content-range']) {
+            res.setHeader('Content-Range', response.headers['content-range']);
+        }
+        if (response.headers['accept-ranges']) {
+            res.setHeader('Accept-Ranges', response.headers['accept-ranges']);
+        }
+
+        // Set status code sesuai response dari Google Drive (misal 206 Partial Content untuk streaming)
+        res.status(response.status);
+
+        // Alirkan (pipe) data video langsung ke browser tanpa menyimpannya di memory server Vercel
+        response.data.pipe(res);
+
+    } catch (error) {
+        console.error('Error streaming dari Google Drive:', error.message);
+        
+        if (error.response) {
+            return res.status(error.response.status).json({ 
+                error: 'Gagal mengambil file dari Google Drive.', 
+                details: error.response.statusText 
+            });
+        }
+        
+        return res.status(500).json({ error: 'Internal Server Error', message: error.message });
     }
-
-    // 3. Tampilkan HTML super ringan yang langsung memutar dari link direct Telegram
-    const htmlContent = `
-      <!DOCTYPE html>
-      <html lang="id">
-      <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-        <title>Video Player</title>
-        <style>
-          /* Reset margin dan buat tampilan hitam penuh (Fullscreen) */
-          * { margin: 0; padding: 0; box-sizing: border-box; }
-          body, html { 
-            width: 100%; 
-            height: 100%; 
-            background-color: #000; /* Latar belakang hitam pekat */
-            overflow: hidden; /* Hilangkan scrollbar */
-            display: flex; 
-            justify-content: center; 
-            align-items: center; 
-          }
-          
-          /* Atur agar video pas di layar tanpa merusak rasio */
-          video { 
-            width: 100vw; 
-            height: 100vh; 
-            object-fit: contain; 
-            background: #000;
-            outline: none;
-          }
-        </style>
-      </head>
-      <body>
-        <!-- preload="auto" memaksa browser memuat video sebelum di-play agar tidak lag -->
-        <video 
-          controls 
-          preload="auto" 
-          playsinline 
-          ${posterUrl ? `poster="${posterUrl}"` : ''}
-        >
-          <source src="${directVideoUrl}" type="video/mp4">
-          Browser kamu tidak mendukung pemutar video HTML5.
-        </video>
-      </body>
-      </html>
-    `;
-
-    res.setHeader('Content-Type', 'text/html');
-    return res.status(200).send(htmlContent);
-
-  } catch (error) {
-    console.error("Kesalahan Server:", error);
-    return res.status(500).send("Terjadi kesalahan sistem saat memuat video.");
-  }
-}
+};
